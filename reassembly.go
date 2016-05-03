@@ -1,62 +1,54 @@
 package main
 
 import (
-	"github.com/ChrisRx/gopacket"
-	"github.com/ChrisRx/gopacket/tcpassembly"
 	"log"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/tcpassembly"
 )
 
-type tcpStreamFactory struct{}
+type streamFactory struct{}
 
-type tcpStream struct {
+func (f *streamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+	s := &stream{
+		net:       net,
+		transport: transport,
+		start:     time.Now(),
+	}
+	s.end = s.start
+	return s
+}
+
+type stream struct {
 	net, transport                       gopacket.Flow
 	bytes, npackets, outOfOrder, skipped int64
 	start, end                           time.Time
 	sawStart, sawEnd                     bool
 	payload                              []byte
-	first, last                          string
-	previous                             string
-	packets                              []string
 }
 
-func (factory *tcpStreamFactory) New(net, transport gopacket.Flow, index string) tcpassembly.Stream {
-	s := &tcpStream{
-		net:       net,
-		transport: transport,
-		start:     time.Now(),
-	}
-	s.first = index
-	s.last = s.first
-	s.previous = s.last
-	s.end = s.start
-	s.packets = append(s.packets, index)
-	return s
-}
-
-func (s *tcpStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
-	for _, reassembly := range reassemblies {
-		if reassembly.Seen.Before(s.end) {
+func (s *stream) Reassembled(rs []tcpassembly.Reassembly) {
+	for _, r := range rs {
+		if r.Seen.Before(s.end) {
 			s.outOfOrder++
 		} else {
-			s.end = reassembly.Seen
+			s.end = r.Seen
 		}
-		s.bytes += int64(len(reassembly.Bytes))
-		s.payload = append(s.payload, reassembly.Bytes...)
+		s.bytes += int64(len(r.Bytes))
+		s.payload = append(s.payload, r.Bytes...)
 		s.npackets += 1
-		if reassembly.Skip > 0 {
-			s.skipped += int64(reassembly.Skip)
+		if r.Skip > 0 {
+			s.skipped += int64(r.Skip)
 		}
-		s.sawStart = s.sawStart || reassembly.Start
-		s.sawEnd = s.sawEnd || reassembly.End
+		s.sawStart = s.sawStart || r.Start
+		s.sawEnd = s.sawEnd || r.End
 	}
 }
 
-func (s *tcpStream) ReassemblyComplete() {
-	if *debugLog {
-		log.Printf("Reassembled: %v:%v", s.net, s.transport)
-		log.Printf("Stream finished: %v -> %v", s.first, s.last)
+func (s *stream) ReassemblyComplete() {
+	if len(s.payload) > 0 {
+		log.Printf("Payload Length: %v\n", len(s.payload))
+		log.Printf("Payload: %+q\n", s.payload)
 	}
-	log.Printf("Payload Length: %v\n", len(s.payload))
-	log.Printf("Payload: %s\n", s.payload)
 }
